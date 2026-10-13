@@ -1,4 +1,3 @@
-
 # app/cost.py
 # Cost = sum(train weight x delay minutes) for trains that cannot
 # pass through the maintenance zone during the block.
@@ -124,3 +123,61 @@ def separate_cost(trains, section_km, requests):
             total += result["cost"]
 
     return round(total, 1)
+
+
+# ---------- NEW: GET /blocks/{id}/options ke liye ----------
+
+def _hhmm(minutes):
+    return f"{minutes // 60:02d}:{minutes % 60:02d}"
+
+
+def slot_options(db, block_id):
+    """
+    Ek block ke liye har possible start time ki delay-cost table.
+    main.py ka GET /blocks/{id}/options isi ko bulata hai.
+    """
+    from app.models import Block, Section, Train
+
+    block = db.get(Block, block_id)
+    if block is None or not block.requests:
+        return []
+
+    section = db.get(Section, block.section_id)
+    trains = (
+        db.query(Train)
+        .filter(Train.section_id == block.section_id)
+        .all()
+    )
+
+    # merged block ki shape requests se nikalo (merge.py jaisa hi rule)
+    reqs = block.requests
+    km_from = min(r.km_from for r in reqs)
+    km_to = max(r.km_to for r in reqs)
+    w_start = max(r.window_start for r in reqs)
+    w_end = min(r.window_end for r in reqs)
+    duration = max(r.duration_min for r in reqs)
+
+    options = []
+    start = w_start
+    while start + duration <= w_end:
+        cost, delay, affected = block_cost(
+            trains, section.length_km, km_from, km_to,
+            start, start + duration,
+        )
+        options.append({
+            "start": start,
+            "end": start + duration,
+            "start_hhmm": _hhmm(start),
+            "end_hhmm": _hhmm(start + duration),
+            "cost": cost,
+            "delay_minutes": delay,
+            "trains_hit": len(affected),
+            "affected": affected,
+            "recommended": False,
+        })
+        start += STEP
+
+    if options:
+        min(options, key=lambda o: o["cost"])["recommended"] = True
+
+    return options

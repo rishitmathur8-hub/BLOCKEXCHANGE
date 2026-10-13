@@ -195,6 +195,7 @@ def _build_proposal(section, trains, buffers, group):
         "merged_cost": best["cost"],
         "separate_cost": separate,
         "cost_saved": round(separate - best["cost"], 1),
+        "recommend_merge": (len(group["requests"]) > 1 and best["cost"] <= separate ),
         "train_delay_min": best["delay_min"],
         "affected_trains": best["affected"],
         "worst_case_cost": worst_cost,

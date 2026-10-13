@@ -4,7 +4,7 @@ from app.models import Block, Request
 # ---------- Part 1: merge logic ----------
 
 def km_overlap(a_from, a_to, b_from, b_to):
-    # True if two km ranges share some part of the track
+    # True agar do km ranges track ka kuch hissa share karte hain
     return a_from < b_to and b_from < a_to
 
 
@@ -12,10 +12,12 @@ def can_join(group, req):
     # same section?
     if group["section_id"] != req.section_id:
         return False
+
     # same stretch of track?
     if not km_overlap(group["km_from"], group["km_to"], req.km_from, req.km_to):
         return False
-    # the shared time window must still fit the longest job
+
+    # common time window mein sabse lamba kaam fit hona chahiye
     start = max(group["window_start"], req.window_start)
     end = min(group["window_end"], req.window_end)
     duration = max(group["duration_min"], req.duration_min)
@@ -57,10 +59,10 @@ def merge_requests(requests):
     return groups
 
 
-# ---------- Part 2: saving to the database ----------
+# ---------- Part 2: database mein save karna ----------
 
 def save_blocks(db, groups):
-    # Turn each merged group
+    # har merged group se ek "proposed" Block banao
     blocks = []
     for g in groups:
         block = Block(
@@ -70,13 +72,57 @@ def save_blocks(db, groups):
             status="proposed",
         )
         db.add(block)
-        db.flush()  # get block.id without committing
+        db.flush()  # commit ke bina block.id mil jaye
         for req in g["requests"]:
             req.block_id = block.id
         blocks.append(block)
     db.commit()
-    return blocks  
+    return blocks
+
+
 def run_merge(db):
+    # sirf wahi requests jo abhi kisi block mein nahi gayi
     reqs = db.query(Request).filter(Request.block_id.is_(None)).all()
     groups = merge_requests(reqs)
     return save_blocks(db, groups)
+
+
+# ---------- Part 3: API ke liye (main.py isi ko bulata hai) ----------
+
+def find_merge_proposals(db):
+    # naye requests ko merge karke "proposed" blocks banao (agar koi naya ho)
+    run_merge(db)
+
+    # jo bhi abhi "proposed" hain, wo sab return karo
+    proposed = (
+        db.query(Block)
+        .filter(Block.status == "proposed")
+        .order_by(Block.start)
+        .all()
+    )
+
+    return [
+        {
+            "block_id": b.id,
+            "section_id": b.section_id,
+            "start": b.start,
+            "end": b.end,
+            "depts": sorted({r.dept for r in b.requests}),
+            "needs_power_block": any(r.needs_power_block for r in b.requests),
+            "requests": [
+                {
+                    "id": r.id,
+                    "dept": r.dept,
+                    "km_from": r.km_from,
+                    "km_to": r.km_to,
+                    "duration_min": r.duration_min,
+                    "window_start": r.window_start,
+                    "window_end": r.window_end,
+                    "work_type": r.work_type,
+                    "needs_power_block": r.needs_power_block,
+                }
+                for r in b.requests
+            ],
+        }
+        for b in proposed
+    ]

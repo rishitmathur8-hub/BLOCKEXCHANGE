@@ -9,6 +9,12 @@
 
 STEP = 15  # Minutes between candidate block start times
 
+# CHANGED (1): naya constant
+# ASSUMPTION: har block ke saath setup + clearance ka fixed time (permission,
+# protection lagana, kaam ke baad track clear karna). Ye asli railway number
+# NAHI hai. Kisi railway wale se verify karo aur slides mein assumption likho.
+BLOCK_OVERHEAD = 20
+
 
 def passing_time(train, section_km, km):
     """Estimate when a train reaches a kilometre position."""
@@ -72,9 +78,10 @@ def best_start(trains, section_km, km_from, km_to,
     start = w_start
 
     while start + duration <= w_end:
+        # CHANGED (2): cost mein BLOCK_OVERHEAD jodna (dikhne wala "end" wahi rehta hai)
         cost, delay, affected = block_cost(
             trains, section_km, km_from, km_to,
-            start, start + duration
+            start, start + duration + BLOCK_OVERHEAD
         )
 
         if best is None or cost < best["cost"]:
@@ -125,7 +132,7 @@ def separate_cost(trains, section_km, requests):
     return round(total, 1)
 
 
-# ---------- NEW: GET /blocks/{id}/options ke liye ----------
+# ---------- GET /blocks/{id}/options ke liye ----------
 
 def _hhmm(minutes):
     return f"{minutes // 60:02d}:{minutes % 60:02d}"
@@ -160,9 +167,10 @@ def slot_options(db, block_id):
     options = []
     start = w_start
     while start + duration <= w_end:
+        # CHANGED (3): yahan bhi overhead, taaki options table aur optimizer same cost dikhayein
         cost, delay, affected = block_cost(
             trains, section.length_km, km_from, km_to,
-            start, start + duration,
+            start, start + duration + BLOCK_OVERHEAD,
         )
         options.append({
             "start": start,

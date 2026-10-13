@@ -317,3 +317,11 @@ def end_block(
     result["overrun_min"] = overrun
     return result
 
+
+@app.post("/optimize/save")
+def save_optimized(db: Session = Depends(get_db)):
+    from app.scheduler import save_proposals
+
+    require_ready(optimize, "scheduler.optimize")
+    result = optimize(db)
+    return save_proposals(db, result["proposals"])

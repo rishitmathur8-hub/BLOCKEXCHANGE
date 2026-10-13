@@ -477,3 +477,8 @@ def save_proposals(db, proposals, commit=True):
         "saved": saved,
         "skipped": skipped,
     }
+
+
+def optimize(db, section_id=None):
+    """POST /optimize ke liye. Read-only: kuch save nahi karta."""
+    return generate_schedule(db, section_id)

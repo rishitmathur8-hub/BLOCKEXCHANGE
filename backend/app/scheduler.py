@@ -91,7 +91,22 @@ def _req_summary(request):
 def _build_proposal(section, trains, buffers, group):
     length_km = section.length_km
 
-    best = group_cost(trains, length_km, group)
+    # Buffer pehle nikalo, taaki slot uske hisaab se chuna jaye.
+    request_buffers = [
+        buffer_for(request.work_type, buffers)
+        for request in group["requests"]
+    ]
+    suggested_buffer = max(request_buffers, default=0)
+
+    # Window ko buffer jitna chhota karke slot dhundho.
+    safe_group = dict(group)
+    safe_group["window_end"] = group["window_end"] - suggested_buffer
+    best = group_cost(trains, length_km, safe_group)
+
+    # Buffer ke saath fit na ho to purani window pe chuno.
+    # Aage feasible=False flag lagega aur insaan review karega.
+    if best is None:
+        best = group_cost(trains, length_km, group)
 
     if best is None:
         return None, "no feasible start time inside the shared window"
@@ -101,13 +116,6 @@ def _build_proposal(section, trains, buffers, group):
         length_km,
         group["requests"],
     )
-
-    # Use the largest historical buffer among the requests in this group.
-    request_buffers = [
-        buffer_for(request.work_type, buffers)
-        for request in group["requests"]
-    ]
-    suggested_buffer = max(request_buffers, default=0)
 
     start = best["start"]
     end = best["end"]

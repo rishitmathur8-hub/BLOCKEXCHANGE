@@ -1,3 +1,5 @@
+from typing import List
+
 from pydantic import BaseModel, ConfigDict
 
 
@@ -23,5 +25,16 @@ class RequestOut(BaseModel):
     window_end: int
     work_type: str
     needs_power_block: bool
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class BlockOut(BaseModel):
+    id: int
+    section_id: int
+    start: int
+    end: int
+    status: str
+    requests: List[RequestOut]
 
     model_config = ConfigDict(from_attributes=True)

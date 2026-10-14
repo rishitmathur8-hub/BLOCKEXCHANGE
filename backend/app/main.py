@@ -325,3 +325,29 @@ def save_optimized(db: Session = Depends(get_db)):
     require_ready(optimize, "scheduler.optimize")
     result = optimize(db)
     return save_proposals(db, result["proposals"])
+
+
+
+
+@app.post("/blocks/{block_id}/cancel")
+def cancel_block(block_id: int, db: Session = Depends(get_db)):
+    block = get_block_or_404(db, block_id)
+
+    if block.status not in ("proposed", "approved"):
+        raise HTTPException(
+            status_code=400,
+            detail="Only a 'proposed' or 'approved' block can be cancelled",
+        )
+
+    # requests ko wapas unassigned karo, taaki /optimize unhe dobara plan kar sake
+    for req in list(block.requests):
+        req.block_id = None
+
+    # kaam shuru hi nahi hua, to is block ka koi actual data nahi hai
+    if block.event is not None:
+        db.delete(block.event)
+
+    block.status = "cancelled"
+    db.commit()
+    db.refresh(block)
+    return block_dict(block)

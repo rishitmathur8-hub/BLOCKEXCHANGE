@@ -1,18 +1,19 @@
 
 # app/scheduler.py
-# Generates scheduling proposals. Human approval is required before execution.
-# generate_schedule() is read-only.
-# save_proposals() saves eligible proposals with status="proposed".
+# CP-SAT scheduling with human approval required before execution.
 
 from app.models import Section, Train, Request, Block
 from app.merge import merge_requests
 from app.cost import group_cost, separate_cost, block_cost
 from app.predict import compute_buffers, buffer_for
+from app.cpsat_scheduler import optimize_groups
+
 
 PENDING = "pending_human_approval"
 
 
 def hhmm(minutes):
+    """Convert minutes into a readable 24-hour time."""
     minutes = int(minutes)
     return (
         f"{(minutes // 60) % 24:02d}:"
@@ -21,10 +22,8 @@ def hhmm(minutes):
     )
 
 
-# ---------- Validation helpers ----------
-
 def _request_problem(request, section_km):
-    """Return a reason when a request cannot be scheduled."""
+    """Return a validation error, or None if the request is valid."""
     values = (
         request.km_from,
         request.km_to,
@@ -45,6 +44,9 @@ def _request_problem(request, section_km):
     if request.duration_min <= 0:
         return "duration must be positive"
 
+    if request.window_end <= request.window_start:
+        return "time window must have a positive length"
+
     if request.window_end - request.window_start < request.duration_min:
         return "time window shorter than the duration"
 
@@ -52,7 +54,7 @@ def _request_problem(request, section_km):
 
 
 def _clean_trains(trains):
-    """Keep trains with usable timing and weight data."""
+    """Ignore trains with invalid timing or weight data."""
     valid = [
         train
         for train in trains
@@ -60,11 +62,14 @@ def _clean_trains(trains):
         and train.exit_time is not None
         and train.exit_time > train.entry_time
         and train.weight is not None
+        and train.weight >= 0
     ]
+
     return valid, len(trains) - len(valid)
 
 
 def _reject(request, reason):
+    """Create a consistent unschedulable-request record."""
     return {
         "request_id": request.id,
         "dept": request.dept,
@@ -74,6 +79,7 @@ def _reject(request, reason):
 
 
 def _req_summary(request):
+    """Return the request fields needed in a proposal."""
     return {
         "id": request.id,
         "dept": request.dept,
@@ -86,30 +92,9 @@ def _req_summary(request):
     }
 
 
-# ---------- Build a proposal ----------
-
-def _build_proposal(section, trains, buffers, group):
+def _build_proposal(section, trains, buffers, group, best):
+    """Build a human-reviewable proposal from a selected time slot."""
     length_km = section.length_km
-
-    # Buffer pehle nikalo, taaki slot uske hisaab se chuna jaye.
-    request_buffers = [
-        buffer_for(request.work_type, buffers)
-        for request in group["requests"]
-    ]
-    suggested_buffer = max(request_buffers, default=0)
-
-    # Window ko buffer jitna chhota karke slot dhundho.
-    safe_group = dict(group)
-    safe_group["window_end"] = group["window_end"] - suggested_buffer
-    best = group_cost(trains, length_km, safe_group)
-
-    # Buffer ke saath fit na ho to purani window pe chuno.
-    # Aage feasible=False flag lagega aur insaan review karega.
-    if best is None:
-        best = group_cost(trains, length_km, group)
-
-    if best is None:
-        return None, "no feasible start time inside the shared window"
 
     separate = separate_cost(
         trains,
@@ -117,10 +102,18 @@ def _build_proposal(section, trains, buffers, group):
         group["requests"],
     )
 
+    request_buffers = [
+        buffer_for(request.work_type, buffers)
+        for request in group["requests"]
+    ]
+
+    suggested_buffer = max(request_buffers, default=0)
+
     start = best["start"]
     end = best["end"]
     safe_end = end + suggested_buffer
 
+    # Calculate the cost if the block overruns by the estimated buffer.
     worst_cost, worst_delay, _ = block_cost(
         trains,
         length_km,
@@ -140,24 +133,28 @@ def _build_proposal(section, trains, buffers, group):
     elif suggested_buffer == 0:
         risk = "UNKNOWN"
         warnings.append(
-            "no positive historical buffer for this group; overrun risk is unknown"
+            "no positive historical buffer for this group; "
+            "overrun risk is unknown"
         )
     elif suggested_buffer <= 15:
         risk = "MEDIUM"
     else:
         risk = "HIGH"
 
+    # The safety buffer must also fit inside the original requested window.
     feasible = safe_end <= group["window_end"]
 
     if not feasible:
         warnings.append(
-            "safety buffer goes past the requested window; rescheduling required"
+            "safety buffer goes past the requested window; "
+            "rescheduling required"
         )
 
     if best["cost"] > separate:
         warnings.append(
-            f"merging increases estimated cost by "
-            f"{round(best['cost'] - separate, 1)}; review separate scheduling"
+            "merging increases estimated cost by "
+            f"{round(best['cost'] - separate, 1)}; "
+            "review separate scheduling"
         )
 
     if not trains:
@@ -169,7 +166,7 @@ def _build_proposal(section, trains, buffers, group):
         request.id for request in group["requests"]
     )
 
-    proposal = {
+    return {
         "proposal_id": (
             f"S{section.id}-R" + "-".join(map(str, request_ids))
         ),
@@ -210,13 +207,9 @@ def _build_proposal(section, trains, buffers, group):
         "warnings": warnings,
     }
 
-    return proposal, None
-
-
-# ---------- Conflict detection ----------
 
 def _flag_conflicts(proposals):
-    """Flag proposals overlapping in both location and buffered time."""
+    """Flag spatially and temporally overlapping buffered proposals."""
     for index, first in enumerate(proposals):
         for second in proposals[index + 1:]:
             if first["section_id"] != second["section_id"]:
@@ -233,8 +226,12 @@ def _flag_conflicts(proposals):
             )
 
             if km_overlap and time_overlap:
-                first["conflicts_with"].append(second["proposal_id"])
-                second["conflicts_with"].append(first["proposal_id"])
+                first["conflicts_with"].append(
+                    second["proposal_id"]
+                )
+                second["conflicts_with"].append(
+                    first["proposal_id"]
+                )
 
                 first["warnings"].append(
                     f"overlaps {second['proposal_id']}: manual review"
@@ -244,9 +241,13 @@ def _flag_conflicts(proposals):
                 )
 
 
-# ---------- Generate a read-only schedule ----------
-
 def generate_schedule(db, section_id=None):
+    """
+    Generate maintenance proposals using CP-SAT.
+
+    Requests that cannot be scheduled are returned in unschedulable.
+    Proposals require human approval before execution.
+    """
     output = {
         "proposals": [],
         "unschedulable": [],
@@ -254,6 +255,7 @@ def generate_schedule(db, section_id=None):
         "summary": {},
     }
 
+    # Load sections.
     section_query = db.query(Section)
 
     if section_id is not None:
@@ -270,6 +272,7 @@ def generate_schedule(db, section_id=None):
         output["warnings"].append("no sections found")
         return output
 
+    # Only schedule requests that are not already assigned to a block.
     request_query = db.query(Request).filter(
         Request.block_id.is_(None)
     )
@@ -286,6 +289,7 @@ def generate_schedule(db, section_id=None):
             request.section_id, []
         ).append(request)
 
+    # Reject requests referencing unknown sections.
     for sid, requests in requests_by_section.items():
         if sid not in sections:
             output["unschedulable"].extend(
@@ -293,7 +297,6 @@ def generate_schedule(db, section_id=None):
                 for request in requests
             )
 
-    # Use the teammate's prediction module without modifying it.
     buffers = compute_buffers(db)
 
     if not buffers:
@@ -301,24 +304,37 @@ def generate_schedule(db, section_id=None):
             "no completed block history; risk is UNKNOWN"
         )
 
+    trains_by_section = {}
+    sections_by_id = {}
+    all_groups = []
+
+    # Validate requests and merge them using the existing merge module.
     for sid, section in sections.items():
         requests = requests_by_section.get(sid, [])
 
         if not requests:
             continue
 
-        if not section.length_km or section.length_km <= 0:
+        if (
+            section.length_km is None
+            or section.length_km <= 0
+        ):
             output["unschedulable"].extend(
-                _reject(request, "section length missing")
+                _reject(request, "section length missing or invalid")
                 for request in requests
             )
             continue
 
-        all_trains = db.query(Train).filter(
-            Train.section_id == sid
-        ).all()
+        all_trains = (
+            db.query(Train)
+            .filter(Train.section_id == sid)
+            .all()
+        )
 
         trains, skipped = _clean_trains(all_trains)
+
+        trains_by_section[sid] = trains
+        sections_by_id[sid] = section
 
         if skipped:
             output["warnings"].append(
@@ -352,26 +368,98 @@ def generate_schedule(db, section_id=None):
             )
             continue
 
-        for group in groups:
-            try:
-                proposal, reason = _build_proposal(
+        all_groups.extend(groups)
+
+    # Compute a conservative safety buffer for each merged group.
+    buffers_by_group = {}
+
+    for index, group in enumerate(all_groups):
+        group_buffers = [
+            buffer_for(request.work_type, buffers)
+            for request in group["requests"]
+        ]
+
+        buffers_by_group[index] = max(
+            group_buffers,
+            default=0,
+        )
+
+    # Jointly optimize the prepared groups.
+    selected = []
+
+    if all_groups:
+        try:
+            selected = optimize_groups(
+                trains_by_section,
+                sections_by_id,
+                all_groups,
+                buffers_by_group=buffers_by_group,
+                time_limit=10,
+            )
+        except Exception as exc:
+            output["warnings"].append(
+                f"CP-SAT scheduling error: {exc}"
+            )
+            selected = None
+
+        if selected is None:
+            output["warnings"].append(
+                "CP-SAT could not find a feasible solution; "
+                "no proposals were generated."
+            )
+
+            for group in all_groups:
+                for request in group["requests"]:
+                    output["unschedulable"].append(
+                        _reject(
+                            request,
+                            "CP-SAT solver failed to find a feasible solution",
+                        )
+                    )
+        else:
+            selected_group_indices = {
+                choice["group_index"]
+                for choice in selected
+            }
+
+            # Reject only groups that were not selected by the optimizer.
+            for group_index, group in enumerate(all_groups):
+                if group_index not in selected_group_indices:
+                    for request in group["requests"]:
+                        output["unschedulable"].append(
+                            _reject(
+                                request,
+                                "no feasible slot after safety buffers "
+                                "and track-conflict constraints",
+                            )
+                        )
+
+            # Build proposals using the selected slots and actual costs.
+            for choice in selected:
+                group = choice["group"]
+                sid = group["section_id"]
+                section = sections_by_id[sid]
+                trains = trains_by_section[sid]
+
+                best = {
+                    "start": choice["start"],
+                    "end": choice["end"],
+                    "cost": choice["cost"],
+                    "delay_min": choice["delay_min"],
+                    "affected": choice["affected"],
+                }
+
+                proposal = _build_proposal(
                     section,
                     trains,
                     buffers,
                     group,
+                    best,
                 )
-            except Exception as exc:
-                proposal = None
-                reason = f"scheduling error: {exc}"
 
-            if proposal is not None:
                 output["proposals"].append(proposal)
-            else:
-                output["unschedulable"].extend(
-                    _reject(request, reason)
-                    for request in group["requests"]
-                )
 
+    # Sort proposals and perform a final conflict check.
     output["proposals"].sort(
         key=lambda proposal: (
             proposal["section_id"],
@@ -405,7 +493,8 @@ def generate_schedule(db, section_id=None):
             1 for p in proposals if not p["feasible"]
         ),
         "merging_increases_cost": sum(
-            1 for p in proposals
+            1
+            for p in proposals
             if p["merged_cost"] > p["separate_cost"]
         ),
     }
@@ -413,14 +502,11 @@ def generate_schedule(db, section_id=None):
     return output
 
 
-# ---------- Save proposals, never approve them ----------
-
 def save_proposals(db, proposals, commit=True):
     """
-    Save eligible proposals with status='proposed'.
+    Save feasible, conflict-free proposals as proposed blocks.
 
-    Infeasible proposals, conflicts, and already-assigned requests
-    are skipped. Running this repeatedly avoids duplicate assignments.
+    Saving a proposal does not authorize maintenance execution.
     """
     saved = []
     skipped = []
@@ -443,13 +529,18 @@ def save_proposals(db, proposals, commit=True):
 
             request_ids = proposal["request_ids"]
 
-            requests = db.query(Request).filter(
-                Request.id.in_(request_ids)
-            ).all()
+            requests = (
+                db.query(Request)
+                .filter(Request.id.in_(request_ids))
+                .all()
+            )
 
             if (
                 len(requests) != len(request_ids)
-                or any(request.block_id is not None for request in requests)
+                or any(
+                    request.block_id is not None
+                    for request in requests
+                )
             ):
                 skipped.append({
                     "proposal_id": proposal["proposal_id"],
@@ -488,6 +579,19 @@ def save_proposals(db, proposals, commit=True):
     }
 
 
-def optimize(db, section_id=None):
-    """POST /optimize ke liye. Read-only: kuch save nahi karta."""
-    return generate_schedule(db, section_id)
+def optimize(db):
+    """
+    Generate maintenance proposals and save eligible proposals
+    as blocks awaiting human approval.
+    """
+    output = generate_schedule(db)
+
+    save_result = save_proposals(
+        db,
+        output["proposals"],
+    )
+
+    output["saved"] = save_result["saved"]
+    output["skipped"] = save_result["skipped"]
+
+    return output

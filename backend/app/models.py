@@ -82,3 +82,18 @@ class BlockEvent(Base):
     overrun_reason = Column(String, nullable=True)
 
     block = relationship("Block", back_populates="event")
+
+
+class AuditEntry(Base):
+    """Audit log of human decisions and operational actions."""
+    __tablename__ = "audit_entries"
+
+    id = Column(Integer, primary_key=True)
+    timestamp = Column(String)  # ISO string or formatted timestamp
+    user_role = Column(String)  # Controller, Field Supervisor, Dept Officer
+    user_name = Column(String)  # Human decision maker
+    action = Column(String)     # APPROVE, REJECT, MODIFY, START, END, REPLAN_ACCEPT, etc.
+    entity_type = Column(String)# block, proposal, request, replan
+    entity_id = Column(String)  # identifier
+    reason = Column(String, nullable=True) # human provided reason
+    details = Column(String, nullable=True)# optional metadata summary

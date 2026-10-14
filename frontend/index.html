@@ -1,126 +1,17 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Block Exchange</title>
-  <link rel="stylesheet" href="style.css">
-  <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700&family=Barlow:wght@400;500;600&display=swap" rel="stylesheet">
-</head>
-<body>
-  <header class="top">
-    <div>
-      <div class="eyebrow">RAILWAY OPERATIONS</div>
-      <h1>Block Exchange</h1>
-      <p class="sub">Maintenance blocks and train movements, by section</p>
-    </div>
-    <div class="top-actions">
-      <span id="updated" class="muted">Not loaded yet</span>
-      <button id="btn-new-req" style="background: linear-gradient(135deg, #4ade80, #16a34a); border-color: #4ade80; box-shadow: 0 5px 18px #16a34a33;">+ New Request</button>
-      <button id="refresh">Refresh</button>
-    </div>
-  </header>
-
-  <div id="error" class="error" hidden></div>
-
-  <main>
-    <!-- Statistics Overview -->
-    <section class="stats-section">
-      <div class="stats-heading">
-        <h2>Live Statistics</h2>
-        <div class="live-indicator"><span></span> Active API Connection</div>
-      </div>
-      <div class="stats-grid">
-        <div class="stat-card stat-blue">
-          <div class="stat-top">
-            <div class="stat-label">Total Blocks</div>
-            <div class="stat-icon">#</div>
-          </div>
-          <div class="stat-value" id="stat-blocks">—</div>
-          <div class="stat-foot">Merged maintenance blocks</div>
-        </div>
-        <div class="stat-amber stat-card">
-          <div class="stat-top">
-            <div class="stat-label">Open Requests</div>
-            <div class="stat-icon">!</div>
-          </div>
-          <div class="stat-value" id="stat-requests">—</div>
-          <div class="stat-foot">Waiting to be merged</div>
-        </div>
-        <div class="stat-green stat-card">
-          <div class="stat-top">
-            <div class="stat-label">Completed</div>
-            <div class="stat-icon">✓</div>
-          </div>
-          <div class="stat-value" id="stat-completed">—</div>
-          <div class="stat-foot">Successfully executed</div>
-        </div>
-        <div class="stat-red stat-card">
-          <div class="stat-top">
-            <div class="stat-label">Overrun</div>
-            <div class="stat-icon">✕</div>
-          </div>
-          <div class="stat-value" id="stat-overruns">—</div>
-          <div class="stat-foot">Exceeded time limits</div>
-        </div>
-      </div>
-    </section>
-
-    <section>
-      <div class="section-head">
-        <h2>Day timeline</h2>
-        <ul id="legend" class="legend"></ul>
-      </div>
-      <div class="scroll">
-        <div id="timeline" class="timeline"></div>
-      </div>
-    </section>
-
-    <section>
-      <div class="section-head">
-        <h2>Blocks <span id="blocks-count" class="count"></span></h2>
-      </div>
-      <div id="blocks-body"></div>
-    </section>
-
-    <section>
-      <div class="section-head">
-        <h2>Open requests <span id="requests-count" class="count"></span></h2>
-      </div>
-      <div id="requests-body"></div>
-    </section>
-
-    <section>
-      <div class="section-head">
-        <h2>Trains <span id="trains-count" class="count"></span></h2>
-      </div>
-      <div id="trains-body"></div>
-    </section>
-  </main>
-
-  <!-- Create Request Modal -->
-  <dialog id="req-modal" class="modal">
-    <form id="req-form">
-      <h2>Create Maintenance Request</h2>
-      <div class="form-grid">
-        <label>Department <input type="text" name="dept" required placeholder="e.g., TRD"></label>
-        <label>Section ID <input type="number" name="section_id" required></label>
-        <label>Work Type <input type="text" name="work_type" required placeholder="e.g., OHE Maintenance"></label>
-        <label>Duration (mins) <input type="number" name="duration_min" required></label>
-        <label>KM From <input type="number" step="0.1" name="km_from" required></label>
-        <label>KM To <input type="number" step="0.1" name="km_to" required></label>
-        <label>Window Start (min) <input type="number" name="window_start" required placeholder="e.g., 600"></label>
-        <label>Window End (min) <input type="number" name="window_end" required placeholder="e.g., 800"></label>
-      </div>
-      <label class="checkbox"><input type="checkbox" name="needs_power_block"> Needs Power Block</label>
-      <div class="modal-actions">
-        <button type="button" id="btn-cancel" class="btn-secondary">Cancel</button>
-        <button type="submit" class="btn-primary">Submit Request</button>
-      </div>
-    </form>
-  </dialog>
-
-  <script src="api.js"></script>
-  <script src="app.js"></script>
-</body>
+<!doctype html>
+<html lang="en" class="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/train.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="Block Exchange: Indian Railways Unified Maintenance Closure & Operational Advisory Window" />
+    <title>Block Exchange | Indian Railways Advisory</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700&family=Barlow:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  </head>
+  <body class="bg-railway-950 text-slate-100 font-sans antialiased selection:bg-blue-600 selection:text-white min-h-screen">
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
 </html>

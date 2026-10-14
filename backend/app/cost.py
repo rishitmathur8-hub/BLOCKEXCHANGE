@@ -1,4 +1,3 @@
-
 # app/cost.py
 # Cost = sum(train weight x delay minutes) for trains that cannot
 # pass through the maintenance zone during the block.
@@ -9,6 +8,12 @@
 # Assumption: each train moves at constant speed through the section.
 
 STEP = 15  # Minutes between candidate block start times
+
+# CHANGED (1): naya constant
+# ASSUMPTION: har block ke saath setup + clearance ka fixed time (permission,
+# protection lagana, kaam ke baad track clear karna). Ye asli railway number
+# NAHI hai. Kisi railway wale se verify karo aur slides mein assumption likho.
+BLOCK_OVERHEAD = 20
 
 
 def passing_time(train, section_km, km):
@@ -73,9 +78,10 @@ def best_start(trains, section_km, km_from, km_to,
     start = w_start
 
     while start + duration <= w_end:
+        # CHANGED (2): cost mein BLOCK_OVERHEAD jodna (dikhne wala "end" wahi rehta hai)
         cost, delay, affected = block_cost(
             trains, section_km, km_from, km_to,
-            start, start + duration
+            start, start + duration + BLOCK_OVERHEAD
         )
 
         if best is None or cost < best["cost"]:
@@ -124,3 +130,62 @@ def separate_cost(trains, section_km, requests):
             total += result["cost"]
 
     return round(total, 1)
+
+
+# ---------- GET /blocks/{id}/options ke liye ----------
+
+def _hhmm(minutes):
+    return f"{minutes // 60:02d}:{minutes % 60:02d}"
+
+
+def slot_options(db, block_id):
+    """
+    Ek block ke liye har possible start time ki delay-cost table.
+    main.py ka GET /blocks/{id}/options isi ko bulata hai.
+    """
+    from app.models import Block, Section, Train
+
+    block = db.get(Block, block_id)
+    if block is None or not block.requests:
+        return []
+
+    section = db.get(Section, block.section_id)
+    trains = (
+        db.query(Train)
+        .filter(Train.section_id == block.section_id)
+        .all()
+    )
+
+    # merged block ki shape requests se nikalo (merge.py jaisa hi rule)
+    reqs = block.requests
+    km_from = min(r.km_from for r in reqs)
+    km_to = max(r.km_to for r in reqs)
+    w_start = max(r.window_start for r in reqs)
+    w_end = min(r.window_end for r in reqs)
+    duration = max(r.duration_min for r in reqs)
+
+    options = []
+    start = w_start
+    while start + duration <= w_end:
+        # CHANGED (3): yahan bhi overhead, taaki options table aur optimizer same cost dikhayein
+        cost, delay, affected = block_cost(
+            trains, section.length_km, km_from, km_to,
+            start, start + duration + BLOCK_OVERHEAD,
+        )
+        options.append({
+            "start": start,
+            "end": start + duration,
+            "start_hhmm": _hhmm(start),
+            "end_hhmm": _hhmm(start + duration),
+            "cost": cost,
+            "delay_minutes": delay,
+            "trains_hit": len(affected),
+            "affected": affected,
+            "recommended": False,
+        })
+        start += STEP
+
+    if options:
+        min(options, key=lambda o: o["cost"])["recommended"] = True
+
+    return options

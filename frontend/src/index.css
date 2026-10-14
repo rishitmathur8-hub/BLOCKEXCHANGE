@@ -1,0 +1,64 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    color-scheme: dark;
+  }
+
+  body {
+    background-color: #070D18;
+    color: #F1F5F9;
+  }
+}
+
+/* Custom scrollbars */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: #0B1528;
+}
+::-webkit-scrollbar-thumb {
+  background: #1C3360;
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #234177;
+}
+
+/* Department badge utilities */
+.dept-badge-eng {
+  @apply bg-amber-500/15 text-amber-300 border border-amber-500/30;
+}
+.dept-badge-st {
+  @apply bg-emerald-500/15 text-emerald-300 border border-emerald-500/30;
+}
+.dept-badge-ohe {
+  @apply bg-purple-500/15 text-purple-300 border border-purple-500/30;
+}
+.dept-badge-general {
+  @apply bg-blue-500/15 text-blue-300 border border-blue-500/30;
+}
+
+/* Status badge utilities */
+.status-proposed {
+  @apply bg-amber-500/20 text-amber-300 border border-amber-500/40;
+}
+.status-approved {
+  @apply bg-emerald-500/20 text-emerald-300 border border-emerald-500/40;
+}
+.status-started {
+  @apply bg-sky-500/20 text-sky-300 border border-sky-500/40;
+}
+.status-completed {
+  @apply bg-slate-600/30 text-slate-300 border border-slate-500/30;
+}
+.status-overrun {
+  @apply bg-rose-500/20 text-rose-300 border border-rose-500/40;
+}
+.status-cancelled {
+  @apply bg-slate-500/10 text-slate-400 border border-slate-600/30;
+}
